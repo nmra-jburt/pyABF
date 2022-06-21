@@ -6,7 +6,7 @@ This file is LIMITED TO THE MANAGEMENT OF HEADER AND DATA information.
 Analysis routines are not written in the ABF class itself. If useful, they
 are to be written in another file and imported as necessary.
 """
-
+import io
 from io import BufferedReader
 import pathlib
 from pyabf.abf2.dataSection import DataSection
@@ -88,44 +88,45 @@ class ABF:
         self._preLoadData = loadData
         self._cacheStimulusFiles = cacheStimulusFiles
 
-        self.abfFilePath = os.path.abspath(abfFilePath)
-        self.abfFolderPath = os.path.dirname(self.abfFilePath)
-
-        if stimulusFileFolder:
-            self.stimulusFileFolder = stimulusFileFolder
-        else:
-            self.stimulusFileFolder = self.abfFolderPath
-
-        if not os.path.exists(self.abfFilePath):
-            raise ValueError("ABF file does not exist: %s" % self.abfFilePath)
-        self.abfID = os.path.splitext(os.path.basename(self.abfFilePath))[0]
-
-        with open(self.abfFilePath, 'rb') as fb:
-
-            # The first 4 bytes of the ABF indicates what type of file it is
-            self.abfVersion = {}
-            fb.seek(0)
-            fileSignature = fb.read(4).decode("ascii", errors='ignore')
-            if fileSignature == "ABF ":
-                self.abfVersion["major"] = 1
-                self._readHeadersV1(fb)
-            elif fileSignature == "ABF2":
-                self.abfVersion["major"] = 2
-                self._readHeadersV2(fb)
+        if not isinstance(abfFilePath, io.BytesIO):
+            self.abfFilePath = os.path.abspath(abfFilePath)
+            self.abfFolderPath = os.path.dirname(self.abfFilePath)
+            if stimulusFileFolder:
+                self.stimulusFileFolder = stimulusFileFolder
             else:
-                raise NotImplementedError("Invalid ABF file format")
+                self.stimulusFileFolder = self.abfFolderPath
+            if not os.path.exists(self.abfFilePath):
+                raise ValueError(f"ABF file does not exist: {self.abfFilePath}")
+            self.abfID = os.path.splitext(os.path.basename(self.abfFilePath))[0]
+            fb = open(self.abfFilePath, 'rb')
+        else:
+            self.abfFilePath = self.abfFolderPath = self.stimulusFileFolder = self.abfID = None
+            fb = abfFilePath
 
-            # create more local variables based on the header data
-            self._makeAdditionalVariables()
+        # The first 4 bytes of the ABF indicates what type of file it is
+        self.abfVersion = {}
+        fb.seek(0)
+        fileSignature = fb.read(4).decode("ascii", errors='ignore')
+        if fileSignature == "ABF ":
+            self.abfVersion["major"] = 1
+            self._readHeadersV1(fb)
+        elif fileSignature == "ABF2":
+            self.abfVersion["major"] = 2
+            self._readHeadersV2(fb)
+        else:
+            raise NotImplementedError("Invalid ABF file format")
 
-            # note the file size
-            fb.seek(0, os.SEEK_END)
-            self._fileSize = fb.tell()
+        # create more local variables based on the header data
+        self._makeAdditionalVariables()
 
-            # optionally load data from disk
-            if self._preLoadData:
-                self._loadAndScaleData(fb)
-                self.setSweep(0)
+        # note the file size
+        fb.seek(0, os.SEEK_END)
+        self._fileSize = fb.tell()
+
+        # optionally load data from disk
+        if self._preLoadData:
+            self._loadAndScaleData(fb)
+            self.setSweep(0)
 
     def __str__(self):
         """
