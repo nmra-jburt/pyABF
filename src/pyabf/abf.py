@@ -475,7 +475,12 @@ class ABF:
 
         # read the data from the ABF file
         fb.seek(self.dataByteStart)
-        raw = np.fromfile(fb, dtype=self._dtype, count=self.dataPointCount)
+        try:
+            raw = np.fromfile(fb, dtype=self._dtype, count=self.dataPointCount)
+        except UnsupportedOperation:
+            fb.seek(self.dataByteStart)
+            raw = np.frombuffer(
+                fb.getbuffer(), dtype=self._dtype, count=self.dataPointCount)
         nRows = self.channelCount
         nCols = int(self.dataPointCount/self.channelCount)
         raw = np.reshape(raw, (nCols, nRows))
