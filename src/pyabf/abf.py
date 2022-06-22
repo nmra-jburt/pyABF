@@ -6,8 +6,10 @@ This file is LIMITED TO THE MANAGEMENT OF HEADER AND DATA information.
 Analysis routines are not written in the ABF class itself. If useful, they
 are to be written in another file and imported as necessary.
 """
-import io
+import tempfile
 from io import BufferedReader
+from io import BytesIO
+from io import UnsupportedOperation
 import pathlib
 from pyabf.abf2.dataSection import DataSection
 import pyabf.abfWriter
@@ -75,20 +77,18 @@ class ABF:
         If supplied, this path is used as an alternate search path to look for stimulus files with the same filename
         in the case the original path does not exist on the machine loading the ABF.
         """
-
-        if (isinstance(abfFilePath, pathlib.Path)):
-            abfFilePath = str(abfFilePath)
-
-        if abfFilePath.lower().endswith(".atf"):
-            raise Exception("use pyabf.ATF (not pyabf.ABF) for ATF files")
-
-        if (os.path.isdir(abfFilePath)):
-            raise Exception("path must be a path to a FILE not a FOLDER.")
-
         self._preLoadData = loadData
+
         self._cacheStimulusFiles = cacheStimulusFiles
 
-        if not isinstance(abfFilePath, io.BytesIO):
+        if not isinstance(abfFilePath, BytesIO):
+            buffer = False
+            if (isinstance(abfFilePath, pathlib.Path)):
+                abfFilePath = str(abfFilePath)
+            if abfFilePath.lower().endswith(".atf"):
+                raise Exception("use pyabf.ATF (not pyabf.ABF) for ATF files")
+            if (os.path.isdir(abfFilePath)):
+                raise Exception("path must be a path to a FILE not a FOLDER.")
             self.abfFilePath = os.path.abspath(abfFilePath)
             self.abfFolderPath = os.path.dirname(self.abfFilePath)
             if stimulusFileFolder:
@@ -98,35 +98,41 @@ class ABF:
             if not os.path.exists(self.abfFilePath):
                 raise ValueError(f"ABF file does not exist: {self.abfFilePath}")
             self.abfID = os.path.splitext(os.path.basename(self.abfFilePath))[0]
-            fb = open(self.abfFilePath, 'rb')
         else:
+            buffer = True
             self.abfFilePath = self.abfFolderPath = self.stimulusFileFolder = self.abfID = None
-            fb = abfFilePath
 
-        # The first 4 bytes of the ABF indicates what type of file it is
-        self.abfVersion = {}
-        fb.seek(0)
-        fileSignature = fb.read(4).decode("ascii", errors='ignore')
-        if fileSignature == "ABF ":
-            self.abfVersion["major"] = 1
-            self._readHeadersV1(fb)
-        elif fileSignature == "ABF2":
-            self.abfVersion["major"] = 2
-            self._readHeadersV2(fb)
-        else:
-            raise NotImplementedError("Invalid ABF file format")
+        with (
+                tempfile.TemporaryFile() if buffer
+                else open(self.abfFilePath, 'rb')
+        ) as fb:
+            if buffer:
+                fb.write(abfFilePath.getbuffer())
 
-        # create more local variables based on the header data
-        self._makeAdditionalVariables()
+            # The first 4 bytes of the ABF indicates what type of file it is
+            self.abfVersion = {}
+            fb.seek(0)
+            fileSignature = fb.read(4).decode("ascii", errors='ignore')
+            if fileSignature == "ABF ":
+                self.abfVersion["major"] = 1
+                self._readHeadersV1(fb)
+            elif fileSignature == "ABF2":
+                self.abfVersion["major"] = 2
+                self._readHeadersV2(fb)
+            else:
+                raise NotImplementedError("Invalid ABF file format")
 
-        # note the file size
-        fb.seek(0, os.SEEK_END)
-        self._fileSize = fb.tell()
+            # create more local variables based on the header data
+            self._makeAdditionalVariables()
 
-        # optionally load data from disk
-        if self._preLoadData:
-            self._loadAndScaleData(fb)
-            self.setSweep(0)
+            # note the file size
+            fb.seek(0, os.SEEK_END)
+            self._fileSize = fb.tell()
+
+            # optionally load data from disk
+            if self._preLoadData:
+                self._loadAndScaleData(fb)
+                self.setSweep(0)
 
     def __str__(self):
         """
